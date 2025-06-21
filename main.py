@@ -1,8 +1,8 @@
 import os
 import re
 import threading
-from dotenv import load_dotenv
 from flask import Flask, request
+from dotenv import load_dotenv
 
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
@@ -13,7 +13,7 @@ from telegram.ext import (
     filters
 )
 
-# === Загрузка токена з .env ===
+# === Завантаження .env змінних ===
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 RENDER_HOST = os.getenv("RENDER_EXTERNAL_HOSTNAME")
@@ -25,7 +25,7 @@ flask_app = Flask(__name__)
 
 @flask_app.route("/", methods=["GET"])
 def index():
-    return "Bot is alive!"
+    return "✅ Bot is alive!"
 
 @flask_app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
@@ -33,7 +33,7 @@ def webhook():
     application.update_queue.put_nowait(update)
     return "ok", 200
 
-# === Словники ===
+# === Заготовки словників ===
 name_declensions = {}
 verb_conjugation = {}
 
@@ -46,7 +46,7 @@ def convert_infinitive_to_past(verb: str, gender: str = "male") -> tuple[str, st
 def decline_name(name: str) -> tuple[str, str]:
     return name_declensions.get(name, (name, "male"))
 
-# === Хендлери ===
+# === Команди ===
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user.first_name
     buttons = [
@@ -91,9 +91,9 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🔥 Почати рольову дію":
         await update.message.reply_text("Додайте мене в чат: https://t.me/BugaichyBot?startgroup=botstart")
     elif text == "📜 Доступні команди":
-        await update.message.reply_text("Список команд скоро буде додано.", parse_mode="Markdown")
+        await update.message.reply_text("Список команд незабаром буде оновлено.")
 
-# === Створення Telegram Application ===
+# === Telegram Application ===
 application = ApplicationBuilder().token(BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start_command))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^/'), handle_command))
@@ -105,10 +105,15 @@ def run_flask():
 
 threading.Thread(target=run_flask).start()
 
-# === Webhook встановлення ===
+# === Webhook запуск ===
 import asyncio
-async def setup_webhook():
+async def run_bot():
     await application.bot.set_webhook(WEBHOOK_URL)
     print(f"✅ Webhook встановлено: {WEBHOOK_URL}")
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=8080,
+        webhook_url=WEBHOOK_URL
+    )
 
-asyncio.run(setup_webhook())
+asyncio.run(run_bot())
