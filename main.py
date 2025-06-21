@@ -1,24 +1,39 @@
 import os
 import re
 import threading
-import asyncio
-from flask import Flask, request
 from dotenv import load_dotenv
+from flask import Flask, request
+
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
-    ApplicationBuilder, ContextTypes,
-    MessageHandler, filters, CommandHandler
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
 )
 
-# === Завантаження змінних оточення ===
+# === Загрузка токена з .env ===
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 RENDER_HOST = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+WEBHOOK_PATH = f"/{BOT_TOKEN}"
+WEBHOOK_URL = f"https://{RENDER_HOST}{WEBHOOK_PATH}"
 
-# === Telegram Application ===
-application = ApplicationBuilder().token(BOT_TOKEN).build()
+# === Flask app ===
+flask_app = Flask(__name__)
 
-# === Словник дій та імен (залиш порожні або наповни) ===
+@flask_app.route("/", methods=["GET"])
+def index():
+    return "Bot is alive!"
+
+@flask_app.route(WEBHOOK_PATH, methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    application.update_queue.put_nowait(update)
+    return "ok", 200
+
+# === Словники ===
 name_declensions = {}
 verb_conjugation = {}
 
@@ -31,7 +46,7 @@ def convert_infinitive_to_past(verb: str, gender: str = "male") -> tuple[str, st
 def decline_name(name: str) -> tuple[str, str]:
     return name_declensions.get(name, (name, "male"))
 
-# === Обробка команди /start ===
+# === Хендлери ===
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user.first_name
     buttons = [
@@ -40,14 +55,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton("📜 Доступні команди")]
     ]
     markup = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-    text = f"Привіт, {user}! Я ваш рольовий бот 🤖. Використовуйте команди для дій!"
-    await update.message.reply_text(text, reply_markup=markup)
+    await update.message.reply_text(f"Привіт, {user}! Я ваш рольовий бот 🤖.", reply_markup=markup)
 
-# === Обробка команд дій /дія @Ім'я [текст] ===
 async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
-
     text = update.message.text.strip()
     user_name = update.effective_user.first_name
 
@@ -62,56 +74,41 @@ async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target_name_accusative, gender = decline_name(target_raw)
     past_verb, emoji = convert_infinitive_to_past(action_input, gender)
-
     target_display = f"{emoji} *{target_name_accusative}*" if emoji else f"*{target_name_accusative}*"
+
     response = f'✨ {user_name} {past_verb} {target_display}'
     if message_text:
         response += f' зі словами: "{message_text}"'
 
     await update.message.reply_text(response, parse_mode="Markdown")
 
-# === Обробка кнопок ===
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "ℹ️ Інструкція":
-        msg = "Використання: `/дія @Ім'я текст`\nПриклад: `/обійняти @Маша Ти неймовірна!`"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        await update.message.reply_text("Використання: `/дія @Ім'я текст`", parse_mode="Markdown")
     elif text == "💬 Зв’язок з розробником":
         await update.message.reply_text("Розробник: @shadow_tar")
     elif text == "🔥 Почати рольову дію":
         await update.message.reply_text("Додайте мене в чат: https://t.me/BugaichyBot?startgroup=botstart")
     elif text == "📜 Доступні команди":
-        await update.message.reply_text("Скоро тут будуть команди!", parse_mode="Markdown")
+        await update.message.reply_text("Список команд скоро буде додано.", parse_mode="Markdown")
 
-# === Додаємо обробники ===
+# === Створення Telegram Application ===
+application = ApplicationBuilder().token(BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start_command))
 application.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^/'), handle_command))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_buttons))
 
-# === Flask-сервер ===
-flask_app = Flask(__name__)
+# === Flask запускається окремо ===
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=8080)
 
-@flask_app.route(f'/{BOT_TOKEN}', methods=['POST'])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
-    return "ok"
+threading.Thread(target=run_flask).start()
 
-@flask_app.route('/')
-def home():
-    return "✅ Бот запущено через webhook!"
+# === Webhook встановлення ===
+import asyncio
+async def setup_webhook():
+    await application.bot.set_webhook(WEBHOOK_URL)
+    print(f"✅ Webhook встановлено: {WEBHOOK_URL}")
 
-# === Запуск сервера і webhook ===
-if __name__ == "__main__":
-    print("🤖 Бот запускається...")
-
-    # Запускаємо Flask у окремому потоці
-    threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=8080)).start()
-
-    # Встановлюємо webhook
-    async def set_webhook():
-        url = f"https://{RENDER_HOST}/{BOT_TOKEN}"
-        await application.bot.set_webhook(url)
-        print(f"✅ Webhook встановлено: {url}")
-
-    asyncio.run(set_webhook())
+asyncio.run(setup_webhook())
