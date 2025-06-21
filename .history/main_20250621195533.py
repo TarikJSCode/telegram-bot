@@ -11,8 +11,6 @@ keep_alive()
 # === Загрузка токена з .env ===
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-print(f"BOT_TOKEN: {BOT_TOKEN}")
-
 
 # === Словник відмінювання імен ===
 
